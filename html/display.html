@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="./reconnectingws.js"></script>
+<link href='http://fonts.googleapis.com/css?family=Slabo+27px|Montserrat' rel='stylesheet' type='text/css'>
+<style type="text/css">
+* { padding: 0; margin: 0; box-sizing: border-box; }
+
+html, body, #container {
+	width: 1920px;
+	height: 1080px;
+
+	font-family: 'Slabo 27px', serif;
+	font-size: 1.3rem;
+}
+
+.clock {
+	position: absolute;
+	top: 60px;
+	left: 60px;
+	width: 300px;
+	height: 90px;
+	line-height: 90px;
+	background-color: black;
+	color: white;
+	text-align: center;
+	transition: opacity 0.5s, height 0.5s ease-in-out;
+	overflow: hidden;
+}
+.noAnimations * {
+	transition: none !important;
+}
+.clockTimer, .clockScoresLeft, .clockScoresRight, .clockScores {
+	height: 45px;
+	line-height: 45px;
+	overflow: hidden;
+}
+.clock:not(.scoresShown), .clock:not(.clockShown) {
+	height: 45px;
+}
+.clockScores, .clockTimer {
+	transition: opacity 0.5s, height 0.5s ease-in-out;
+}
+.clock:not(.scoresShown) .clockScores {
+	opacity: 0;
+	height: 0;
+}
+.clock:not(.scoresShown):not(.clockShown) {
+	height: 0;
+	opacity: 0;
+}
+.clock:not(.clockShown) .clockTimer {
+	opacity: 0;
+	height: 0;
+}
+.clockTeam {
+	font-weight: bold;
+}
+.clockTimer {
+	width: 300px;
+	background-color: black;
+	font-weight: bold;
+	font-family: 'Montserrat', serif;
+}
+.clockScores {
+	width: 300px;
+}
+.clockScoresLeft, .clockScoresRight {
+	width: 150px;
+	float: left;
+}
+.clockScoresLeft {
+	background-color: blue;
+}
+
+.clockScoreContainer[data-abbr="ICU"] {
+	background-color: #02064a;
+}
+.clockScoreContainer[data-abbr="ICSM"] {
+	background-color: #5f000d;
+}
+.clockScoreContainer {
+	position: relative;
+}
+.clockSideLeft, .clockSideRight {
+	position: absolute;
+	top: 0; left: 0;
+	width: 100%;
+	padding: 0 0.45em;
+}
+.clockSideLeft {
+	text-align: left;
+}
+.clockSideRight {
+	text-align: right;
+}
+
+.marquee {
+	position: absolute;
+	bottom: 60px;
+	left: 60px;
+	right: 60px;
+	background-color: black;
+	height: 45px;
+	line-height: 45px;
+	color: white;
+	opacity: 0;
+	transition: opacity 0.5s;
+}
+.marquee.marqueeShown {
+	opacity: 1;
+}
+.marquee .backContainer {
+	position: relative;
+	width: 100%; height: 100%;
+}
+.marquee .leftEdge, .marquee .rightEdge {
+	position: absolute;
+	top: 0; bottom: 0;
+	width: 100px;
+	z-index: 100;
+}
+.marquee .leftEdge {
+	left: 0;
+	background: linear-gradient(to right, rgba(0,0,0,1), rgba(0,0,0,0));
+}
+.marquee .rightEdge {
+	right: 0;
+	background: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,0,1));
+}
+.marquee marquee {
+	position: absolute;
+	top: 0; left: 0; right: 0; bottom: 0;
+	z-index: 20;
+}
+</style>
+</head>
+<body class="noAnimations">
+	<div id="clock" class="clock">
+		<div class="clockTimer">00:00</div>
+		<div class="clockScores">
+			<div class="clockScoresLeft clockScoreContainer">
+				<div class="clockTeam clockSideLeft">ICU</div>
+				<div class="clockScore clockSideRight">0</div>
+			</div>
+			<div class="clockScoresRight clockScoreContainer">
+				<div class="clockScore clockSideLeft">0</div>
+				<div class="clockTeam clockSideRight">ICSM</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="marquee" id="marquee">
+		<div class="backContainer">
+			<div class="leftEdge"></div>
+			<div class="rightEdge"></div>
+			<div class="marqueeContainer"><marquee scrollamount="10">Some text here</marquee></div>
+		</div>
+	</div>
+<script>
+var TARGET_WS = document.location.origin.replace('http', 'ws') + '/ws';
+
+console.log('TARGET_WS', TARGET_WS);
+var ws = new ReconnectingWebSocket(TARGET_WS);
+ws.onopen = function() {
+	ws.send(JSON.stringify({ type: 'display' }));
+};
+function setClassByVal(el, className, val) {
+	if (el.classList.contains(className) && !val) {
+		el.classList.remove(className);
+	} else if (!el.classList.contains(className) && val) {
+		el.classList.add(className);
+	}
+}
+function setAbbr(el, abbr) {
+	el.dataset.abbr = abbr;
+}
+function setVal(el, val) {
+	el.innerHTML = val;
+}
+function setScore(el, abbr, score) {
+	setAbbr(el, abbr);
+	setVal(el.querySelector('.clockTeam'), abbr);
+	setVal(el.querySelector('.clockScore'), score);
+}
+function formatTime(ts) {
+	var pad = function(x) { if (x < 10) { return '0' + x; } return x; }
+
+	var seconds = ts % 60;
+	var minutes = (ts - seconds) / 60;
+	return pad(minutes) + ':' + pad(seconds);
+}
+var lastMessageTime = null, shouldRunTimer = false, lastTimerVal = null, lastMarqueeText = null;
+ws.onmessage = function(x) {
+	var d = JSON.parse(x.data);
+
+	lastMessageTime = (+new Date());
+
+	var clock = document.querySelector('#clock');
+	var timer = clock.querySelector('.clockTimer');
+	var leftScore = clock.querySelector('.clockScoresLeft');
+	var rightScore = clock.querySelector('.clockScoresRight');
+	
+	setClassByVal(clock, 'clockShown', d.clock.show);
+	setClassByVal(clock, 'scoresShown', d.scores.show);
+
+	setScore(leftScore, d.scores.leftTeam.abbr, d.scores.leftTeam.score);
+	setScore(rightScore, d.scores.rightTeam.abbr, d.scores.rightTeam.score);
+
+	setVal(timer, formatTime(d.clock.time));
+
+
+	var marquee = document.querySelector('#marquee');
+
+	setClassByVal(marquee, 'marqueeShown', d.marquee.show);
+	if (lastMarqueeText != d.marquee.text && d.marquee.show) {
+		lastMarqueeText = d.marquee.text;
+		marquee.querySelector('.marqueeContainer').innerHTML = "<marquee scrollamount=\"10\"></marquee>";
+		marquee.querySelector('.marqueeContainer marquee').innerHTML = lastMarqueeText;
+	}
+
+	shouldRunTimer = !!d.clock.run;
+	lastTimerVal = parseInt(d.clock.time, 10);
+};
+
+setInterval(function() {
+	if (!shouldRunTimer || lastTimerVal === null) return;
+
+	if (lastMessageTime + 1000 > (+new Date())) return;
+	console.log('bumping time');
+	lastTimerVal += 1;
+	setVal(document.querySelector('#clock .clockTimer'), formatTime(lastTimerVal));	
+}, 1000);
+
+setTimeout(function() {
+	document.body.classList.remove('noAnimations');
+}, 500);
+</script>
+</body>
+</html>

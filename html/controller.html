@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<script src="./reconnectingws.js"></script>
+</head>
+<body>
+<h1>Clock</h1>
+<label><input type="checkbox" id="showClock"> Show Clock</label><br>
+<label><input type="checkbox" id="runClock"> Run Clock</label><br>
+<label><input type="number" id="clockValue"> Clock Value</label> (<input type="text" disabled id="clockValueHuman">)
+
+<h1>Scores</h1>
+<label><input type="checkbox" id="showScores"> Show Scores</label>
+<table>
+	<tr>
+		<td style="border: 1px solid black;">
+			<h2>Left</h2>
+			<table>
+				<tr>
+					<td>Abbreviation (ICU/ICSM):</td>
+					<td><input type="text" id="leftTeamAbbr"></td>
+				</tr>
+				<tr>
+					<td>Score:</td>
+					<td><input type="number" id="leftTeamScore"></td>
+				</tr>
+				<tr>
+					<td colspan="2">
+						<button onclick="incr(document.querySelector('#leftTeamScore'), this.innerText)">+5</button>
+						<button onclick="incr(document.querySelector('#leftTeamScore'), this.innerText)">+2</button>
+						<button onclick="incr(document.querySelector('#leftTeamScore'), this.innerText)">+3</button>
+					</td>
+				</tr>
+			</table>
+		</td>
+		<td style="border: 1px solid black;">
+			<h2>Right</h2>
+			<table>
+				<tr>
+					<td>Abbreviation (ICU/ICSM):</td>
+					<td><input type="text" id="rightTeamAbbr"></td>
+				</tr>
+				<tr>
+					<td>Score:</td>
+					<td><input type="number" id="rightTeamScore"></td>
+				</tr>
+				<tr>
+					<td colspan="2">
+						<button onclick="incr(document.querySelector('#rightTeamScore'), this.innerText)">+5</button>
+						<button onclick="incr(document.querySelector('#rightTeamScore'), this.innerText)">+2</button>
+						<button onclick="incr(document.querySelector('#rightTeamScore'), this.innerText)">+3</button>
+					</td>
+				</tr>
+			</table>
+		</td>
+	</tr>
+	<tr>
+		<td style="border: 1px solid black;" colspan="2">
+			<button onclick="swapSides()">Swap</button>
+		</td>
+	</tr>
+</table>
+
+<h1>Marquee</h1>
+<label><input type="checkbox" id="showMarquee"> Show Marquee</label><br>
+<label><input type="text" id="marqueeText"> Marquee text</label>
+
+<script>
+var TARGET_WS = document.location.origin.replace('http', 'ws') + '/ws';
+var UPDATE_INTERVAL = 200;
+
+console.log('TARGET_WS', TARGET_WS);
+
+function isChecked(id) {
+	return document.querySelector('#' + id + ':checked') !== null;
+}
+function val(id) {
+	return document.getElementById(id).value;	
+}
+function setVal(id, val) {
+	document.getElementById(id).value = val;
+}
+function setChecked(id, checked) {
+	document.getElementById(id).checked = checked;	
+}
+
+function swapSides() {
+	var leftTeam = {
+		abbr: val('leftTeamAbbr'),
+		score: val('leftTeamScore'),
+	};
+	setVal('leftTeamAbbr', val('rightTeamAbbr'));
+	setVal('leftTeamScore', val('rightTeamScore'));
+
+	setVal('rightTeamAbbr', leftTeam.abbr);
+	setVal('rightTeamScore', leftTeam.score);
+}
+
+function formatTime(ts) {
+	var pad = function(x) { if (x < 10) { return '0' + x; } return x; }
+
+	var seconds = ts % 60;
+	var minutes = (ts - seconds) / 60;
+	return pad(minutes) + ':' + pad(seconds);
+}
+
+var clockLastStart = null, clockLastVal = null;
+setInterval(function() {
+	var cv = document.querySelector('#clockValue');
+	document.querySelector('#clockValueHuman').value = formatTime(cv.value);
+
+	var runClock = document.querySelector('#runClock:checked') !== null;
+	cv.disabled = runClock;
+	if (!runClock) {
+		clockLastStart = null;
+		return;
+	}
+	if (clockLastStart === null) {
+		clockLastStart = +new Date();
+		clockLastVal = parseInt(cv.value, 10);
+	}
+
+	var secondsSinceLastStart = (+new Date() - clockLastStart) / 1000;
+
+	cv.value = Math.floor(secondsSinceLastStart + clockLastVal);
+}, 200);
+
+var updateWs = function() {
+	var obj = {};
+	obj.clock = {
+		show: isChecked('showClock'),
+		time: val('clockValue'),
+		run: isChecked('runClock'),
+		timerMinutiae: {
+			lastStart: clockLastStart,
+			lastVal: clockLastVal,
+		}
+	};
+	obj.scores = {
+		show: isChecked('showScores'),
+		leftTeam: {
+			abbr: val('leftTeamAbbr'),
+			score: val('leftTeamScore'),
+		},
+		rightTeam: {
+			abbr: val('rightTeamAbbr'),
+			score: val('rightTeamScore'),
+		},
+	};
+	obj.marquee = {
+		show: isChecked('showMarquee'),
+		text: val('marqueeText'),
+	}
+
+	ws.send(JSON.stringify(obj));
+
+	document.querySelector('#marqueeText').disabled = isChecked('showMarquee');
+};
+var incr = function(el, s) {
+	s = parseInt(s, 10);
+	el.value = parseInt(el.value, 10) + s;
+};
+
+
+var ws = new ReconnectingWebSocket(TARGET_WS);
+var t = null;
+ws.onopen = function() {
+	console.log('ws open');
+	ws.send(JSON.stringify({ type: 'control' }));
+	if (t != null) clearInterval(t);
+	t = setInterval(updateWs, UPDATE_INTERVAL);
+};
+ws.onclose = function() {
+	console.log('ws close');
+	if (t != null) clearInterval(t);
+	t = null;
+};
+ws.onmessage = function(x) {
+	var d = JSON.parse(x.data);
+	console.log('got', x, d);
+
+	setChecked('showClock', d.clock.show);
+	setChecked('runClock', d.clock.run);
+	setVal('clockValue', d.clock.time);
+
+	setChecked('showScores', d.scores.show);
+	setVal('leftTeamAbbr', d.scores.leftTeam.abbr);
+	setVal('leftTeamScore', d.scores.leftTeam.score);
+	setVal('rightTeamAbbr', d.scores.rightTeam.abbr);
+	setVal('rightTeamScore', d.scores.rightTeam.score);
+
+	setChecked('showMarquee', d.marquee.show);
+	setVal('marqueeText', d.marquee.text);
+
+	clockLastStart = d.clock.timerMinutiae.lastStart;
+	clockLastVal = d.clock.timerMinutiae.lastVal;
+};
+</script>
+</body>
+</html>
